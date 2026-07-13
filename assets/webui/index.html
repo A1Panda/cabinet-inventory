@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="app" x-init="init()" :data-theme="isDark ? 'dark' : ''">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>柜子管家</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ===== 顶栏 ===== -->
+    <header class="top-bar">
+      <h1 class="logo">
+        <i class="fas fa-layer-group"></i>
+        <span>柜子管家</span>
+      </h1>
+      <div class="search-box">
+        <button @click="doSearch" aria-label="搜索">
+          <i class="fas fa-search"></i>
+        </button>
+        <input
+          type="text"
+          x-model="searchQuery"
+          @keydown.enter="doSearch"
+          @input="doSearch"
+          placeholder="搜索物品名称、标签、别名..."
+          autocomplete="off"
+        >
+      </div>
+      <div class="header-actions">
+        <button @click="toggleTheme" class="btn-icon" :title="isDark ? '亮色模式' : '暗色模式'">
+          <i class="fas" :class="isDark ? 'fa-sun' : 'fa-moon'"></i>
+        </button>
+        <button @click="openStats" class="btn-icon" title="统计">
+          <i class="fas fa-chart-simple"></i>
+        </button>
+        <button @click="exportCSV" class="btn-icon" title="导出 CSV">
+          <i class="fas fa-download"></i>
+        </button>
+        <button @click="manualBackup" class="btn-icon" title="手动备份">
+          <i class="fas fa-floppy-disk"></i>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <!-- ===== 柜子列表 ===== -->
+      <section class="cabinet-list">
+        <div class="section-header-main">
+          <h2><i class="fas fa-cabinet-filing"></i> 柜子列表</h2>
+          <button @click="openCabinetForm()" class="btn-primary">
+            <i class="fas fa-plus"></i> 添加柜子
+          </button>
+        </div>
+
+        <!-- 空状态 -->
+        <div class="empty-state" x-show="!cabinets.length" x-transition>
+          <i class="fas fa-box-archive empty-icon"></i>
+          <p>还没有柜子，点击「添加柜子」开始整理</p>
+        </div>
+
+        <!-- 柜子网格 -->
+        <div class="cabinet-grid" x-show="cabinets.length">
+          <template x-for="cab in cabinets" :key="cab.id">
+            <div class="cabinet-card" :class="{ expanded: expandedCabinet === cab.id }">
+              <!-- Card Header -->
+              <div class="cabinet-card-header" @click="toggleCabinet(cab.id)">
+                <div>
+                  <h3>
+                    <span class="cabinet-id-badge" x-text="cab.id"></span>
+                    <span x-text="cab.name"></span>
+                    <i class="fas fa-chevron-down expand-icon"></i>
+                  </h3>
+                  <div class="cabinet-location" x-show="cab.location_desc">
+                    <i class="fas fa-location-dot"></i>
+                    <span x-text="cab.location_desc"></span>
+                  </div>
+                  <div class="cabinet-meta" x-text="cab.sectionCount + ' 个分段'"></div>
+                </div>
+                <div class="cabinet-card-actions" @click.stop>
+                  <button @click="openSectionForm(cab.id)" class="btn-outline btn-sm">
+                    <i class="fas fa-plus"></i> 分段
+                  </button>
+                  <button @click="openCabinetForm(cab.id)" class="btn-outline btn-sm">
+                    <i class="fas fa-pen"></i>
+                  </button>
+                  <button @click="deleteCabinet(cab.id)" class="btn-outline btn-sm btn-del">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Expanded Body -->
+              <div class="cabinet-card-body" x-show="expandedCabinet === cab.id" x-transition>
+                <div x-show="cabinetLoading" class="loading">
+                  <span class="spinner"></span>
+                </div>
+
+                <template x-for="(sec, secId) in (cabinetDetail?.sections || {})" :key="secId">
+                  <div class="section-group">
+                    <div class="section-header" @click.stop="toggleSection(secId)">
+                      <div>
+                        <span class="section-badge" x-text="secId"></span>
+                        <span x-text="sec.name || secId"></span>
+                        <span class="section-meta" x-text="countSectionItems(sec) + ' 件'"></span>
+                      </div>
+                      <div class="section-header-actions">
+                        <button
+                          @click.stop="openItemForm(cab.id, secId)"
+                          class="btn-outline btn-sm"
+                          title="存入物品"
+                        ><i class="fas fa-box"></i></button>
+                        <button
+                          @click.stop="deleteSection(cab.id, secId)"
+                          class="btn-outline btn-sm btn-del"
+                          title="删除分段"
+                        ><i class="fas fa-trash"></i></button>
+                      </div>
+                    </div>
+
+                    <div class="section-body" x-show="expandedSections[secId]" x-transition>
+                      <ul class="item-list">
+                        <li class="item-row empty" x-show="!sec.items?.length">
+                          <i class="fas fa-inbox"></i> 暂无物品
+                        </li>
+                        <template x-for="item in (sec.items || [])" :key="item.id">
+                          <li class="item-row">
+                            <div class="item-info">
+                              <div>
+                                <span class="item-name" x-text="item.name"></span>
+                                <span class="item-qty" x-text="'×' + item.qty"></span>
+                              </div>
+                              <div class="item-tags" x-show="item.tags?.length">
+                                <template x-for="tag in item.tags" :key="tag">
+                                  <span class="tag" x-text="tag"></span>
+                                </template>
+                              </div>
+                              <div class="item-note" x-show="item.note" x-text="item.note"></div>
+                              <div class="item-note" x-show="item.aliases?.length" x-text="'别名: ' + item.aliases.join(', ')"></div>
+                            </div>
+                            <div class="item-actions">
+                              <input
+                                type="number"
+                                class="item-qty-input"
+                                x-model="takeQtys[item.id]"
+                                min="1"
+                                value="1"
+                                @click.stop
+                              >
+                              <button @click.stop="addItem(item.id, item.qty)" class="btn-outline btn-sm btn-add">存入</button>
+                              <button @click.stop="takeItem(item.id, item.qty)" class="btn-outline btn-sm">取走</button>
+                              <button @click.stop="deleteItem(item.id)" class="btn-outline btn-sm btn-del">
+                                <i class="fas fa-trash"></i>
+                              </button>
+                            </div>
+                          </li>
+                        </template>
+                      </ul>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- No sections -->
+                <div
+                  class="section-group"
+                  x-show="cabinetDetail && !Object.keys(cabinetDetail.sections || {}).length"
+                >
+                  <div class="section-header" style="justify-content:center;color:var(--text-tertiary)">
+                    暂无分段，点击「+ 分段」开始添加
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <!-- ===== 搜索结果侧栏 ===== -->
+      <aside class="side-panel">
+        <div class="section-header-main">
+          <h2><i class="fas fa-magnifying-glass"></i> 搜索结果</h2>
+          <button @click="clearSearch" class="btn-text" x-show="Array.isArray(searchResults)">
+            <i class="fas fa-times"></i> 清除
+          </button>
+        </div>
+        <div class="search-results">
+          <!-- Initial hint -->
+          <p class="hint" x-show="searchResults === null || searchResults === false">
+            <i class="fas fa-search"></i> 输入关键词搜索，或点击柜子查看详情
+          </p>
+          <!-- No results -->
+          <div class="no-results" x-show="Array.isArray(searchResults) && !searchResults.length">
+            <i class="fas fa-face-frown"></i>
+            <span>没有找到匹配的物品</span>
+          </div>
+          <!-- Result count -->
+          <p
+            class="result-count"
+            x-show="searchResults && searchResults.length"
+            x-text="'找到 ' + searchResults.length + ' 个结果'"
+          ></p>
+          <!-- Results -->
+          <template x-for="r in (searchResults || [])" :key="r.item?.id || Math.random()">
+            <div class="result-item">
+              <div class="result-name">
+                <span x-html="highlight(r.item.name, searchQuery)"></span>
+                <span class="result-qty" x-text="'×' + r.item.qty"></span>
+              </div>
+              <div class="result-location">
+                <i class="fas fa-location-dot"></i>
+                <strong x-text="r.cabinetId"></strong>
+                <span x-text="r.cabinetName + ' / ' + (r.sectionId || '')"></span>
+              </div>
+              <div class="item-tags" x-show="r.item.tags?.length" style="margin-top:6px">
+                <template x-for="tag in r.item.tags" :key="tag">
+                  <span class="tag" :class="{ highlight: tag.toLowerCase().includes(searchQuery.toLowerCase()) }" x-text="tag"></span>
+                </template>
+              </div>
+              <div class="item-note" x-show="r.item.note" x-text="r.item.note"></div>
+              <div class="item-note" x-show="r.item.aliases?.length" x-text="'别名: ' + r.item.aliases.join(', ')"></div>
+            </div>
+          </template>
+        </div>
+      </aside>
+    </main>
+
+    <!-- ===== Modal: Cabinet ===== -->
+    <div
+      class="modal" x-cloak x-show="modal.cabinet"
+      @click.self="modal.cabinet = false"
+      @keydown.escape.window="modal.cabinet = false"
+      x-transition.opacity
+    >
+      <div class="modal-content" x-transition.scale>
+        <div class="modal-header">
+          <h3 x-text="cabinetForm._editing ? '编辑柜子' : '添加柜子'"></h3>
+          <button @click="modal.cabinet = false" class="modal-close">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <label>柜号 <span class="required">*</span></label>
+          <input
+            type="text"
+            x-model="cabinetForm.id"
+            placeholder="如 A, B, C..."
+            :disabled="cabinetForm._editing"
+            @input="cabinetForm.id = cabinetForm.id.toUpperCase()"
+          >
+          <label>名称 <span class="required">*</span></label>
+          <input type="text" x-model="cabinetForm.name" placeholder="如 仓库大铁柜">
+          <label>位置描述</label>
+          <input type="text" x-model="cabinetForm.location" placeholder="如 仓库进门左手边">
+        </div>
+        <div class="modal-footer">
+          <button @click="modal.cabinet = false" class="btn-outline">取消</button>
+          <button @click="saveCabinet" class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Modal: Section ===== -->
+    <div
+      class="modal" x-cloak x-show="modal.section"
+      @click.self="modal.section = false"
+      @keydown.escape.window="modal.section = false"
+      x-transition.opacity
+    >
+      <div class="modal-content" x-transition.scale>
+        <div class="modal-header">
+          <h3>添加分段</h3>
+          <button @click="modal.section = false" class="modal-close">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <label>分段编号 <span class="required">*</span></label>
+          <input
+            type="text"
+            x-model="sectionForm.id"
+            placeholder="如 A1, A2, B1"
+            x-ref="sectionIdInput"
+          >
+          <p class="form-hint">格式：柜号 + 序号，如 A1、A2、B1</p>
+          <label>分段名称</label>
+          <input type="text" x-model="sectionForm.name" placeholder="如 右1号分格（可选）">
+        </div>
+        <div class="modal-footer">
+          <button @click="modal.section = false" class="btn-outline">取消</button>
+          <button @click="saveSection" class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Modal: Item ===== -->
+    <div
+      class="modal" x-cloak x-show="modal.item"
+      @click.self="modal.item = false"
+      @keydown.escape.window="modal.item = false"
+      x-transition.opacity
+    >
+      <div class="modal-content" x-transition.scale>
+        <div class="modal-header">
+          <h3>存入物品</h3>
+          <button @click="modal.item = false" class="modal-close">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <i class="fas fa-location-dot"></i>
+            <span x-text="'存入: ' + itemForm.cabinetId + ' / ' + itemForm.sectionId"></span>
+          </div>
+          <label>物品名称 <span class="required">*</span></label>
+          <input type="text" x-model="itemForm.name" placeholder="如 华为 66W 充电器">
+          <label>数量</label>
+          <input type="number" x-model="itemForm.qty" min="1">
+          <label>标签（逗号分隔）</label>
+          <input type="text" x-model="itemForm.tags" placeholder="充电器, 华为, 66W">
+          <label>别名（逗号分隔）</label>
+          <input type="text" x-model="itemForm.aliases" placeholder="华为充电头">
+          <label>备注</label>
+          <input type="text" x-model="itemForm.note" placeholder="如 白色，配套线也在">
+        </div>
+        <div class="modal-footer">
+          <button @click="modal.item = false" class="btn-outline">取消</button>
+          <button @click="saveItem" class="btn-primary">存入</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Modal: Stats ===== -->
+    <div
+      class="modal" x-cloak x-show="modal.stats"
+      @click.self="modal.stats = false"
+      @keydown.escape.window="modal.stats = false"
+      x-transition.opacity
+    >
+      <div class="modal-content modal-wide" x-transition.scale>
+        <div class="modal-header">
+          <h3><i class="fas fa-chart-simple" style="color:var(--accent)"></i> 统计概览</h3>
+          <button @click="modal.stats = false" class="modal-close">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div x-show="!statsData" class="loading"><span class="spinner"></span></div>
+          <template x-if="statsData">
+            <div>
+              <div class="stats-grid">
+                <div class="stat-card">
+                  <div class="stat-value" x-text="statsData.cabinetCount"></div>
+                  <div class="stat-label">柜子总数</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-value" x-text="statsData.totalItems"></div>
+                  <div class="stat-label">物品种类</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-value" x-text="statsData.totalQty"></div>
+                  <div class="stat-label">物品总数量</div>
+                </div>
+              </div>
+              <h4 style="margin-bottom:10px;font-weight:600;font-size:0.9rem">各柜子概况</h4>
+              <table class="stats-table">
+                <thead>
+                  <tr><th>柜号</th><th>名称</th><th>分段</th><th>种类</th><th>总量</th></tr>
+                </thead>
+                <tbody>
+                  <template x-for="c in statsData.cabinets" :key="c.id">
+                    <tr>
+                      <td><span class="cabinet-id-badge" x-text="c.id"></span></td>
+                      <td x-text="c.name"></td>
+                      <td x-text="c.sectionCount"></td>
+                      <td x-text="c.itemCount"></td>
+                      <td x-text="c.totalQty"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Toast ===== -->
+    <div
+      class="toast"
+      :class="toast.type + (toast.show ? ' show' : '')"
+      x-text="toast.msg"
+      x-show="toast.show"
+    ></div>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</body>
+</html>
