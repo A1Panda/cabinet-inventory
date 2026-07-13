@@ -53,8 +53,8 @@
 
   /* Layout */
   --header-h:      60px;
-  --content-w:     1280px;
-  --sidebar-w:     360px;
+  --content-w:     96vw;
+  --sidebar-w:     380px;
 
   /* Motion */
   --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
